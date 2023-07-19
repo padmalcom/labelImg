@@ -8,6 +8,12 @@ import shutil
 import sys
 import webbrowser as wb
 from functools import partial
+import numpy as np
+
+# autolabel
+from ultralytics import YOLO
+from PIL import Image
+import glob
 
 try:
 	from PyQt5.QtGui import *
@@ -180,7 +186,10 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.file_dock.setObjectName(get_str('files'))
 		self.file_dock.setWidget(file_list_container)
 		
-		# auto labeling		
+		# auto labeling
+
+		self.auto_label_path = None # auto label dataset path
+		
 		self.train_auto_labeling_checkbox = QCheckBox(get_str('auto_labeling_train'))
 		self.use_auto_labeling_checkbox = QCheckBox(get_str('use_auto_labeling'))
 		self.auto_labeling_steps_label = QLabel(get_str('auto_labeling_steps'))
@@ -258,7 +267,6 @@ class MainWindow(QMainWindow, WindowMixin):
 		# Actions
 		action = partial(new_action, self)
 				
-		# normal actions
 		quit = action(get_str('quit'), self.close,
 					  'Ctrl+Q', 'quit', get_str('quitApp'))
 
@@ -613,9 +621,103 @@ class MainWindow(QMainWindow, WindowMixin):
 		if label not in self.label_hist:
 			self.label_hist.append(label)
 
+	def save_yolo_autolabels(self):
+		image_file_name = os.path.basename(self.file_path)
+		saved_file_name = os.path.splitext(image_file_name)[0]
+		if not self.auto_label_path:
+			if self.file_path:
+				self.auto_label_path = os.path.join(ustr(self.default_save_dir), "auto_model")
+				print("Setting auto label path to:", self.auto_label_path)
+			else:
+				print("Cannot create auto label path.")
+				return
+			
+		print("Auto path:", self.auto_label_path)
+		if not os.path.exists(self.auto_label_path):
+			os.makedirs(self.auto_label_path)
+			
+		saved_path = os.path.join(self.auto_label_path, saved_file_name)
+		tmp_format = self.label_file_format
+		self.label_file_format = LabelFileFormat.YOLO
+		self.save_labels(saved_path)
+		self.label_file_format = tmp_format
+		
+		# save image
+		im = Image.open(self.file_path)
+		rgb_im = im.convert("RGB")
+		rgb_im.save(os.path.join(self.auto_label_path, os.path.splitext(image_file_name)[0] + ".jpg"))
+		
+		self.create_yolo_cfg()
+	
+	def create_yolo_cfg(self):
+		with open(os.path.join(self.auto_label_path, "yolov8al.yaml"), "w") as f:
+			f.write("path: " + self.auto_label_path + "\n")
+			f.write("train: ../train" + "\n")
+			f.write("val: ../val" + "\n")
+			f.write("test: ../test" + "\n")
+			f.write("names:" + "\n")
+			for i,c in enumerate(self.label_hist):
+				f.write("  " + str(i) + ": " + c + "\n")
+					
 		
 	def auto_label_train_func(self):
 		print("Train")
+		
+		if not self.auto_label_path:
+			print("Folder 'auto_label' does not exist. Please select a folder with images to label first.")
+			return
+			
+		if not os.path.exists(os.path.join(self.auto_label_path, "yolov8al.yaml")):
+			print("The yolov8al.yaml configuration does not exist. Please label at least one image first.")
+			return
+		
+		all_jpg_files = glob.glob(self.auto_label_path + os.sep + "*.jpg")
+		print("There are", len(all_jpg_files), "labeled images in", self.auto_label_path + os.sep + "*.jpg")
+		train, validate, test = np.split(all_jpg_files, [int(len(all_jpg_files)*0.7), int(len(all_jpg_files)*0.9)])
+
+		# create folders
+		if not os.path.exists(os.path.join(self.auto_label_path, "train")):
+			os.makedirs(os.path.join(self.auto_label_path, "train"))
+				
+		if not os.path.exists(os.path.join(self.auto_label_path, "val")):
+			os.makedirs(os.path.join(self.auto_label_path, "val"))
+			
+		if not os.path.exists(os.path.join(self.auto_label_path, "test")):
+			os.makedirs(os.path.join(self.auto_label_path, "test"))
+			
+		# distribute files
+		for f in train:
+			print("File for training", f)
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "train", os.path.basename(f)))
+			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt", 
+				os.path.join(self.auto_label_path, "train", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+			
+		for f in validate:
+			print("File for validation", f)
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "val", os.path.basename(f)))
+			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
+				os.path.join(self.auto_label_path, "val", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+		
+		for f in test:
+			print("File for testing", f)
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "test", os.path.basename(f)))			
+			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
+				os.path.join(self.auto_label_path, "test", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+			
+		
+		# start new each time, since there might be new labels
+		model = YOLO('yolov8n.pt') 
+		results = model.train(data=os.path.join(self.auto_label_path, "yolov8al.yaml"), imgsz=640, epochs=10, batch=8, name='yolov8n_al') #resume=True
+		results = model.val()
+		success = model.export(format='onnx')
+		results = model.predict(source='https://media.roboflow.com/notebooks/examples/dog.jpeg', conf=0.25)
+		
+		# load all tags
+		# split into train, test, validation
+		# train the model
+		# update status
+		# save the model
+		# print score and path
 	
 	def keyReleaseEvent(self, event):
 		if event.key() == Qt.Key_Control:
@@ -1438,6 +1540,15 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.default_save_dir = target_dir_path
 		if self.file_path:
 			self.show_bounding_box_from_annotation_file(file_path=self.file_path)
+		
+		auto_label_path = os.path.join(self.last_open_dir, "auto_label")
+		if os.path.exists(auto_label_path):
+			print("Found existing auto label path:", self.auto_label_path)
+		else:
+			print("No existing auto label path in:", auto_label_path, "Creating...")
+			os.makedirs(auto_label_path)
+		self.auto_label_path = auto_label_path
+		
 
 	def import_dir_images(self, dir_path):
 		if not self.may_continue() or not dir_path:
@@ -1581,6 +1692,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
 	def _save_file(self, annotation_file_path):
 		if annotation_file_path and self.save_labels(annotation_file_path):
+			
+			self.save_yolo_autolabels()
+			
 			self.set_clean()
 			self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
 			self.statusBar().show()
