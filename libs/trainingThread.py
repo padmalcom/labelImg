@@ -5,6 +5,8 @@ import os
 class TrainingThread(QThread):
 	finished = pyqtSignal(int)
 	progress = pyqtSignal(int)
+	export_model = pyqtSignal(str)
+	model_map = pyqtSignal(int)
 	
 	def __init__(self, num_epochs, model_path):
 		QThread.__init__(self)
@@ -20,11 +22,14 @@ class TrainingThread(QThread):
 		model.add_callback("on_train_end", self.on_train_end)
 		model.add_callback("teardown", self.on_train_teardown)	
 
-		results = model.train(data=os.path.join(self.model_path, "yolov8al.yaml"), imgsz=640, epochs=self.num_epochs, batch=8, name='yolov8n_al') #resume=True
-		print("Training results:", results)
-		#results = model.val()
-		success = model.export(format='onnx')
-		print("Export success:", success)
+		model.train(data=os.path.join(self.model_path, "yolov8al.yaml"), imgsz=640, epochs=self.num_epochs,
+			batch=8, name='yolov8n_al', project=self.model_path, exist_ok=True) #resume=True
+		results = model.val()
+		print("Val results:", results)
+		path = model.export(format="onnx")
+		print("Model path:", path, "map50:", results.box.map50)
+		self.export_model.emit(path)
+		self.model_map.emit(results.box.map50)
 		#results = model.predict(source='https://media.roboflow.com/notebooks/examples/dog.jpeg', conf=0.25)		
 		
 	def on_train_end(self, trainer):

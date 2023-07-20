@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 import glob
 from libs.trainingThread import TrainingThread
+from ultralytics import YOLO
 
 try:
 	from PyQt5.QtGui import *
@@ -187,9 +188,9 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.file_dock.setWidget(file_list_container)
 		
 		# auto labeling
-
 		self.auto_label_path = None # auto label dataset path
 		self.NUM_EPOCHS = 10
+		self.auto_model = None
 		
 		self.train_auto_labeling_checkbox = QCheckBox(get_str('auto_labeling_train'))
 		self.use_auto_labeling_checkbox = QCheckBox(get_str('use_auto_labeling'))
@@ -230,6 +231,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.auto_label_current.clicked.connect(self.auto_label_current_func)
 		self.train_auto_model.clicked.connect(self.auto_label_train_func)
 		
+		self.disable_auto_label_controls()
 		# end - auto labeling
 
 		self.zoom_widget = ZoomWidget()
@@ -594,8 +596,40 @@ class MainWindow(QMainWindow, WindowMixin):
 		if self.file_path and os.path.isdir(self.file_path):
 			self.open_dir_dialog(dir_path=self.file_path, silent=True)
 
+	def disable_auto_label_controls(self):
+		self.train_auto_labeling_checkbox.setDisabled(True)
+		self.use_auto_labeling_checkbox.setDisabled(True)
+		self.auto_labeling_steps_label.setDisabled(True)
+		self.auto_labeling_steps_spinner.setDisabled(True)
+		self.auto_labeling_model_path.setDisabled(True)
+		self.auto_labeling_model_score.setDisabled(True)
+		self.train_auto_model.setDisabled(True)
+		self.auto_label_current.setDisabled(True)
+
+	def enable_auto_label_controls(self):
+		self.train_auto_labeling_checkbox.setEnabled(True)
+		self.use_auto_labeling_checkbox.setEnabled(True)
+		self.auto_labeling_steps_label.setEnabled(True)
+		self.auto_labeling_steps_spinner.setEnabled(True)
+		self.auto_labeling_model_path.setEnabled(True)
+		self.auto_labeling_model_score.setEnabled(True)
+		self.train_auto_model.setEnabled(True)
+		self.auto_label_current.setEnabled(True)
+	
 	def auto_label_current_func(self):
 		print("Label")
+		
+		# if there is no image -> cancel
+		
+		if not self.file_path:
+			return
+			
+		if self.auto_model is not None:
+			res = self.auto_model.predict(source=self.file_path, conf=0.25)
+			for r in res:
+				for bb in r.boxes:
+					print("prediction box:", bb)
+			
 		label = "AutoLabel"
 		min_x = 10
 		min_y = 10
@@ -626,6 +660,9 @@ class MainWindow(QMainWindow, WindowMixin):
 	def save_yolo_autolabels(self):
 		image_file_name = os.path.basename(self.file_path)
 		saved_file_name = os.path.splitext(image_file_name)[0]
+		
+		assert self.auto_label_path # for testing
+		
 		if not self.auto_label_path:
 			if self.file_path:
 				self.auto_label_path = os.path.join(ustr(self.default_save_dir), "auto_model")
@@ -666,11 +703,21 @@ class MainWindow(QMainWindow, WindowMixin):
 		print("Train")
 		
 		if not self.auto_label_path:
-			print("Folder 'auto_label' does not exist. Please select a folder with images to label first.")
+			msg = QMessageBox()
+			msg.setIcon(QMessageBox.Information)
+			msg.setText("Folder 'auto_label' does not exist. Please select a folder with images to label first.")
+			msg.setWindowTitle("Training start failed")
+			msg.setStandardButtons(QMessageBox.Ok)
+			msg.exec_()
 			return
 			
 		if not os.path.exists(os.path.join(self.auto_label_path, "yolov8al.yaml")):
-			print("The yolov8al.yaml configuration does not exist. Please label at least one image first.")
+			msg = QMessageBox()
+			msg.setIcon(QMessageBox.Information)
+			msg.setText("The yolov8al.yaml configuration does not exist. Please label at least one image first.")
+			msg.setWindowTitle("Training start failed")
+			msg.setStandardButtons(QMessageBox.Ok)
+			msg.exec_()
 			return
 		
 		all_jpg_files = glob.glob(self.auto_label_path + os.sep + "*.jpg")
@@ -712,6 +759,8 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.training_thread.started.connect(self.start_training_thread)
 		self.training_thread.finished.connect(self.finish_training_thread)
 		self.training_thread.progress.connect(self.progress_training_thread)
+		self.training_thread.export_model.connect(self.receive_model_path)
+		self.training_thread.model_map.connect(self.receive_model_map)
 		
 		self.training_thread.start()
 		
@@ -722,12 +771,21 @@ class MainWindow(QMainWindow, WindowMixin):
 		# save the model
 		# print score and path
 	
+	def receive_model_path(self, path):
+		self.auto_model = YOLO(path)
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)		
+		self.auto_labeling_model_path.setText(get_str('auto_labeling_model_path') + " " + path)
+		
+	def receive_model_map(self, precision):
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)
+		self.auto_labeling_model_score.setText(get_str('auto_labeling_model_score') + " " + str(precision))
+		
 	def start_training_thread(self):
 		self.auto_labeling_progressbar.reset()
 		self.auto_labeling_progressbar.setRange(0, self.NUM_EPOCHS + 2)
 		self.auto_labeling_progressbar.setValue(1)
-		self.train_auto_model.setEnabled(False)
-		self.auto_label_current.setEnabled(False)
+		self.train_auto_model.setDisabled(True)
+		self.auto_label_current.setDisabled(True)
 		
 	def finish_training_thread(self, value):
 		print("Finish hook:", value)
@@ -1486,12 +1544,16 @@ class MainWindow(QMainWindow, WindowMixin):
 		extensions = ['.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
 		images = []
 
-		for root, dirs, files in os.walk(folder_path):
-			for file in files:
-				if file.lower().endswith(tuple(extensions)):
-					relative_path = os.path.join(root, file)
-					path = ustr(os.path.abspath(relative_path))
-					images.append(path)
+		#for root, dirs, files in os.walk(folder_path):
+		#	for file in files:
+		#		if file.lower().endswith(tuple(extensions)):
+		#			relative_path = os.path.join(root, file)
+		#			path = ustr(os.path.abspath(relative_path))
+		#			images.append(path)
+		for file in os.listdir(folder_path):
+			if file.lower().endswith(tuple(extensions)):
+				images.append(os.path.join(folder_path, file))
+					
 		natural_sort(images, key=lambda x: x.lower())
 		return images
 
@@ -1565,11 +1627,22 @@ class MainWindow(QMainWindow, WindowMixin):
 		
 		auto_label_path = os.path.join(self.last_open_dir, "auto_label")
 		if os.path.exists(auto_label_path):
-			print("Found existing auto label path:", self.auto_label_path)
+			print("Found existing auto label path:", auto_label_path)
 		else:
 			print("No existing auto label path in:", auto_label_path, "Creating...")
 			os.makedirs(auto_label_path)
+		
+		# auto label
 		self.auto_label_path = auto_label_path
+		self.enable_auto_label_controls()
+		
+		# load model		
+		model_path = os.path.join(self.auto_label_path, "yolov8n_al", "weights", "best.pt")
+		if os.path.exists(model_path):
+			print("Loading existing model from:", model_path)
+			self.auto_model = YOLO(model_path)
+
+		
 		
 
 	def import_dir_images(self, dir_path):
