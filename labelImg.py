@@ -11,9 +11,9 @@ from functools import partial
 import numpy as np
 
 # autolabel
-from ultralytics import YOLO
 from PIL import Image
 import glob
+from libs.trainingThread import TrainingThread
 
 try:
 	from PyQt5.QtGui import *
@@ -189,6 +189,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		# auto labeling
 
 		self.auto_label_path = None # auto label dataset path
+		self.NUM_EPOCHS = 10
 		
 		self.train_auto_labeling_checkbox = QCheckBox(get_str('auto_labeling_train'))
 		self.use_auto_labeling_checkbox = QCheckBox(get_str('use_auto_labeling'))
@@ -218,6 +219,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		auto_label_layout.addWidget(self.auto_labeling_progressbar)
 		auto_label_layout.addWidget(self.train_auto_model)
 		auto_label_layout.addWidget(self.auto_label_current)
+		auto_label_layout.addStretch()
 		
 		auto_label_container = QWidget()
 		auto_label_container.setLayout(auto_label_layout)
@@ -703,14 +705,15 @@ class MainWindow(QMainWindow, WindowMixin):
 			shutil.copyfile(f, os.path.join(self.auto_label_path, "test", os.path.basename(f)))			
 			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
 				os.path.join(self.auto_label_path, "test", os.path.splitext(os.path.basename(f))[0]) + ".txt")
-			
+					
+		# start new each time, since there might be new labels	
+		self.training_thread = TrainingThread(self.NUM_EPOCHS, self.auto_label_path)
 		
-		# start new each time, since there might be new labels
-		model = YOLO('yolov8n.pt') 
-		results = model.train(data=os.path.join(self.auto_label_path, "yolov8al.yaml"), imgsz=640, epochs=10, batch=8, name='yolov8n_al') #resume=True
-		results = model.val()
-		success = model.export(format='onnx')
-		results = model.predict(source='https://media.roboflow.com/notebooks/examples/dog.jpeg', conf=0.25)
+		self.training_thread.started.connect(self.start_training_thread)
+		self.training_thread.finished.connect(self.finish_training_thread)
+		self.training_thread.progress.connect(self.progress_training_thread)
+		
+		self.training_thread.start()
 		
 		# load all tags
 		# split into train, test, validation
@@ -719,6 +722,25 @@ class MainWindow(QMainWindow, WindowMixin):
 		# save the model
 		# print score and path
 	
+	def start_training_thread(self):
+		self.auto_labeling_progressbar.reset()
+		self.auto_labeling_progressbar.setRange(0, self.NUM_EPOCHS + 2)
+		self.auto_labeling_progressbar.setValue(1)
+		self.train_auto_model.setEnabled(False)
+		self.auto_label_current.setEnabled(False)
+		
+	def finish_training_thread(self, value):
+		print("Finish hook:", value)
+		self.auto_labeling_progressbar.setValue(value)
+		self.train_auto_model.setEnabled(True)
+		self.auto_label_current.setEnabled(True)
+		#self.training_thread.deleteLater()
+		
+	
+	def progress_training_thread(self, value):
+		print("Update Progress...", value)
+		self.auto_labeling_progressbar.setValue(value)
+			
 	def keyReleaseEvent(self, event):
 		if event.key() == Qt.Key_Control:
 			self.canvas.set_drawing_shape_to_square(False)
