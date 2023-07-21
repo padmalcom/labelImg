@@ -205,6 +205,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.auto_labeling_model_score = QLabel(get_str('auto_labeling_model_score'))
 		self.auto_labeling_progressbar = QProgressBar()
 		self.auto_labeling_progressbar.setValue(0)
+		self.auto_labeling_status_label = QLabel(get_str('auto_label_status'))
 		self.train_auto_model = QPushButton(get_str('auto_labeling_train_button'))
 		self.auto_label_current = QPushButton(get_str('auto_label_current_button'))
 		
@@ -218,6 +219,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		auto_label_layout.addWidget(self.auto_labeling_model_path)
 		auto_label_layout.addWidget(self.auto_labeling_model_score)
 		auto_label_layout.addWidget(self.auto_labeling_progressbar)
+		auto_label_layout.addWidget(self.auto_labeling_status_label)
 		auto_label_layout.addWidget(self.train_auto_model)
 		auto_label_layout.addWidget(self.auto_label_current)
 		auto_label_layout.addStretch()
@@ -232,6 +234,8 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.train_auto_model.clicked.connect(self.auto_label_train_func)
 		
 		self.disable_auto_label_controls()
+		
+		self.auto_labeling_status_label.setText(get_str('auto_label_status') + "No model loaded")
 		# end - auto labeling
 
 		self.zoom_widget = ZoomWidget()
@@ -626,27 +630,36 @@ class MainWindow(QMainWindow, WindowMixin):
 			
 		if self.auto_model is not None:
 			res = self.auto_model.predict(source=self.file_path, conf=0.25)
+			box_count = 0
 			for r in res:
+				box_count += len(r.boxes)
 				for bb in r.boxes:
 					print("prediction box:", bb)
 			
-		label = "AutoLabel"
-		min_x = 10
-		min_y = 10
-		max_x = 100
-		max_y = 100
-		self.canvas.current = Shape()
-		self.canvas.current.add_point(QPointF(min_x, min_y))
-		self.canvas.current.add_point(QPointF(max_x, min_y))
-		self.canvas.current.add_point(QPointF(max_x, max_y))
-		self.canvas.current.add_point(QPointF(min_x, max_y))
-		self.canvas.current.close()
-		self.canvas.shapes.append(self.canvas.current)
-		self.canvas.current = None
-		self.prev_label_text = label
-		generate_color = generate_color_by_text(label)
-		shape = self.canvas.set_last_label(label, generate_color, generate_color)
-		self.add_label(shape)
+					label = "AutoLabel"
+					min_x = 10
+					min_y = 10
+					max_x = 100
+					max_y = 100
+					self.canvas.current = Shape()
+					self.canvas.current.add_point(QPointF(min_x, min_y))
+					self.canvas.current.add_point(QPointF(max_x, min_y))
+					self.canvas.current.add_point(QPointF(max_x, max_y))
+					self.canvas.current.add_point(QPointF(min_x, max_y))
+					self.canvas.current.close()
+					self.canvas.shapes.append(self.canvas.current)
+					self.canvas.current = None
+					self.prev_label_text = label
+					generate_color = generate_color_by_text(label)
+					shape = self.canvas.set_last_label(label, generate_color, generate_color)
+					self.add_label(shape)
+					if label not in self.label_hist:
+						self.label_hist.append(label)
+
+			print("Found", box_count, "items.")
+			get_str = lambda str_id: self.string_bundle.get_string(str_id)
+			self.auto_labeling_status_label.setText(get_str('auto_label_status') + "Found " + str(box_count) + " items.")
+			
 		if self.beginner():  # Switch to edit mode.
 			self.canvas.set_editing(True)
 			self.actions.create.setEnabled(True)
@@ -654,27 +667,9 @@ class MainWindow(QMainWindow, WindowMixin):
 			self.actions.editMode.setEnabled(True)
 		self.set_dirty()
 
-		if label not in self.label_hist:
-			self.label_hist.append(label)
-
 	def save_yolo_autolabels(self):
 		image_file_name = os.path.basename(self.file_path)
-		saved_file_name = os.path.splitext(image_file_name)[0]
-		
-		assert self.auto_label_path # for testing
-		
-		if not self.auto_label_path:
-			if self.file_path:
-				self.auto_label_path = os.path.join(ustr(self.default_save_dir), "auto_model")
-				print("Setting auto label path to:", self.auto_label_path)
-			else:
-				print("Cannot create auto label path.")
-				return
-			
-		print("Auto path:", self.auto_label_path)
-		if not os.path.exists(self.auto_label_path):
-			os.makedirs(self.auto_label_path)
-			
+		saved_file_name = os.path.splitext(image_file_name)[0]			
 		saved_path = os.path.join(self.auto_label_path, saved_file_name)
 		tmp_format = self.label_file_format
 		self.label_file_format = LabelFileFormat.YOLO
@@ -684,6 +679,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		# save image
 		im = Image.open(self.file_path)
 		rgb_im = im.convert("RGB")
+		# TODO: resize?
 		rgb_im.save(os.path.join(self.auto_label_path, os.path.splitext(image_file_name)[0] + ".jpg"))
 		
 		self.create_yolo_cfg()
@@ -781,6 +777,8 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.auto_labeling_model_score.setText(get_str('auto_labeling_model_score') + " " + str(precision))
 		
 	def start_training_thread(self):
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)
+		self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Starting training...")
 		self.auto_labeling_progressbar.reset()
 		self.auto_labeling_progressbar.setRange(0, self.NUM_EPOCHS + 2)
 		self.auto_labeling_progressbar.setValue(1)
@@ -788,7 +786,8 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.auto_label_current.setDisabled(True)
 		
 	def finish_training_thread(self, value):
-		print("Finish hook:", value)
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)
+		self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Finished training")
 		self.auto_labeling_progressbar.setValue(value)
 		self.train_auto_model.setEnabled(True)
 		self.auto_label_current.setEnabled(True)
@@ -797,6 +796,8 @@ class MainWindow(QMainWindow, WindowMixin):
 	
 	def progress_training_thread(self, value):
 		print("Update Progress...", value)
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)
+		self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Training running...")
 		self.auto_labeling_progressbar.setValue(value)
 			
 	def keyReleaseEvent(self, event):
@@ -1544,15 +1545,16 @@ class MainWindow(QMainWindow, WindowMixin):
 		extensions = ['.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
 		images = []
 
-		#for root, dirs, files in os.walk(folder_path):
-		#	for file in files:
-		#		if file.lower().endswith(tuple(extensions)):
-		#			relative_path = os.path.join(root, file)
-		#			path = ustr(os.path.abspath(relative_path))
-		#			images.append(path)
-		for file in os.listdir(folder_path):
-			if file.lower().endswith(tuple(extensions)):
-				images.append(os.path.join(folder_path, file))
+		for root, dirs, files in os.walk(folder_path):
+			for file in files:
+				if file.lower().endswith(tuple(extensions)):
+					relative_path = os.path.join(root, file)
+					path = ustr(os.path.abspath(relative_path))
+					images.append(path)
+					print("Appending", path)
+		#for file in os.listdir(folder_path):
+		#	if file.lower().endswith(tuple(extensions)):
+		#		images.append(os.path.join(folder_path, file))
 					
 		natural_sort(images, key=lambda x: x.lower())
 		return images
@@ -1631,6 +1633,9 @@ class MainWindow(QMainWindow, WindowMixin):
 		else:
 			print("No existing auto label path in:", auto_label_path, "Creating...")
 			os.makedirs(auto_label_path)
+		
+		get_str = lambda str_id: self.string_bundle.get_string(str_id)
+		self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Model loaded")
 		
 		# auto label
 		self.auto_label_path = auto_label_path

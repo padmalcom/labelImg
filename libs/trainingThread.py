@@ -16,6 +16,8 @@ class TrainingThread(QThread):
 
 	def run(self):
 		model = YOLO('yolov8n.pt')
+		#model = YOLO('yolov8n.yaml')
+		print(model.info())
 		self.process = 0
 		model.add_callback("on_train_epoch_start", self.on_train_epoch_start)
 		model.add_callback("on_train_epoch_end", self.on_train_epoch_end)
