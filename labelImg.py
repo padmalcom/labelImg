@@ -632,20 +632,15 @@ class MainWindow(QMainWindow, WindowMixin):
 			res = self.auto_model.predict(task="detect", source=self.file_path, conf=0.25)
 			box_count = 0
 			for r in res:
-				box_count += len(r.boxes)
-				for bb in r.boxes:
-					print("prediction box:", bb)
-			
-					label = "AutoLabel"
-					min_x = 10
-					min_y = 10
-					max_x = 100
-					max_y = 100
+				result = r.cpu()
+				box_count += len(result.boxes)
+				for bb in result.boxes:
+					label = self.label_hist[int(bb.cls.item())]
 					self.canvas.current = Shape()
-					self.canvas.current.add_point(QPointF(min_x, min_y))
-					self.canvas.current.add_point(QPointF(max_x, min_y))
-					self.canvas.current.add_point(QPointF(max_x, max_y))
-					self.canvas.current.add_point(QPointF(min_x, max_y))
+					self.canvas.current.add_point(QPointF(bb.xyxy[0][0], bb.xyxy[0][1]))
+					self.canvas.current.add_point(QPointF(bb.xyxy[0][2], bb.xyxy[0][1]))
+					self.canvas.current.add_point(QPointF(bb.xyxy[0][2], bb.xyxy[0][3]))
+					self.canvas.current.add_point(QPointF(bb.xyxy[0][0], bb.xyxy[0][3]))
 					self.canvas.current.close()
 					self.canvas.shapes.append(self.canvas.current)
 					self.canvas.current = None
@@ -654,9 +649,10 @@ class MainWindow(QMainWindow, WindowMixin):
 					shape = self.canvas.set_last_label(label, generate_color, generate_color)
 					self.add_label(shape)
 					if label not in self.label_hist:
+						print("Label is not in history:", label)
 						self.label_hist.append(label)
 
-			print("Found", box_count, "items.")
+			print("Found", box_count, "objects.")
 			get_str = lambda str_id: self.string_bundle.get_string(str_id)
 			self.auto_labeling_status_label.setText(get_str('auto_label_status') + "Found " + str(box_count) + " items.")
 			
@@ -1645,8 +1641,17 @@ class MainWindow(QMainWindow, WindowMixin):
 				
 		# auto label
 		self.auto_label_path = auto_label_path
-		self.enable_auto_label_controls()
 		
+		# labels
+		if os.path.exists(os.path.join(self.last_open_dir, "classes.txt")):
+			with open(os.path.join(self.last_open_dir, "classes.txt"), "r") as cf:
+				data = cf.read()
+				for l in data.split("\n"):
+					if len(l.strip()) > 0:
+						self.label_hist.append(l.strip())
+						print("Loaded label:", l.strip())
+				self.update_combo_box()
+				
 		# load model		
 		model_path = os.path.join(self.auto_label_path, "yolov8n_al", "weights", "best.pt")
 		if os.path.exists(model_path):
@@ -1660,6 +1665,7 @@ class MainWindow(QMainWindow, WindowMixin):
 			self.auto_labeling_model_path.setText(get_str('auto_labeling_model_path') + " " + os.path.join("yolov8n_al", "weights", "best.pt"))
 			self.auto_labeling_model_score.setText(get_str('auto_labeling_model_score') + " " + str(results.box.map50))
 			self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Model loaded")
+		self.enable_auto_label_controls()
 
 	def import_dir_images(self, dir_path):
 		if not self.may_continue() or not dir_path:
@@ -1749,6 +1755,10 @@ class MainWindow(QMainWindow, WindowMixin):
 
 		if filename:
 			self.load_file(filename)
+			
+		# auto label
+		if self.use_auto_labeling_checkbox.isChecked():
+			self.auto_label_current_func()
 
 	def open_file(self, _value=False):
 		if not self.may_continue():
