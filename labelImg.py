@@ -629,7 +629,7 @@ class MainWindow(QMainWindow, WindowMixin):
 			return
 			
 		if self.auto_model is not None:
-			res = self.auto_model.predict(source=self.file_path, conf=0.25)
+			res = self.auto_model.predict(task="detect", source=self.file_path, conf=0.25)
 			box_count = 0
 			for r in res:
 				box_count += len(r.boxes)
@@ -687,9 +687,9 @@ class MainWindow(QMainWindow, WindowMixin):
 	def create_yolo_cfg(self):
 		with open(os.path.join(self.auto_label_path, "yolov8al.yaml"), "w") as f:
 			f.write("path: " + self.auto_label_path + "\n")
-			f.write("train: ../train" + "\n")
-			f.write("val: ../val" + "\n")
-			f.write("test: ../test" + "\n")
+			f.write("train: ./images/train" + "\n")
+			f.write("val: ./images/val" + "\n")
+			f.write("test: ./images/test" + "\n")
 			f.write("names:" + "\n")
 			for i,c in enumerate(self.label_hist):
 				f.write("  " + str(i) + ": " + c + "\n")
@@ -721,33 +721,42 @@ class MainWindow(QMainWindow, WindowMixin):
 		train, validate, test = np.split(all_jpg_files, [int(len(all_jpg_files)*0.7), int(len(all_jpg_files)*0.9)])
 
 		# create folders
-		if not os.path.exists(os.path.join(self.auto_label_path, "train")):
-			os.makedirs(os.path.join(self.auto_label_path, "train"))
+		if not os.path.exists(os.path.join(self.auto_label_path, "images", "train")):
+			os.makedirs(os.path.join(self.auto_label_path, "images", "train"))
 				
-		if not os.path.exists(os.path.join(self.auto_label_path, "val")):
-			os.makedirs(os.path.join(self.auto_label_path, "val"))
+		if not os.path.exists(os.path.join(self.auto_label_path, "images", "val")):
+			os.makedirs(os.path.join(self.auto_label_path, "images", "val"))
 			
-		if not os.path.exists(os.path.join(self.auto_label_path, "test")):
-			os.makedirs(os.path.join(self.auto_label_path, "test"))
+		if not os.path.exists(os.path.join(self.auto_label_path, "images", "test")):
+			os.makedirs(os.path.join(self.auto_label_path, "images", "test"))
+			
+		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "train")):
+			os.makedirs(os.path.join(self.auto_label_path, "labels", "train"))
+				
+		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "val")):
+			os.makedirs(os.path.join(self.auto_label_path, "labels", "val"))
+			
+		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "test")):
+			os.makedirs(os.path.join(self.auto_label_path, "labels", "test"))
 			
 		# distribute files
 		for f in train:
 			print("File for training", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "train", os.path.basename(f)))
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "train", os.path.basename(f)))
 			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt", 
-				os.path.join(self.auto_label_path, "train", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+				os.path.join(self.auto_label_path, "labels", "train", os.path.splitext(os.path.basename(f))[0]) + ".txt")
 			
 		for f in validate:
 			print("File for validation", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "val", os.path.basename(f)))
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "val", os.path.basename(f)))
 			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
-				os.path.join(self.auto_label_path, "val", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+				os.path.join(self.auto_label_path, "labels", "val", os.path.splitext(os.path.basename(f))[0]) + ".txt")
 		
 		for f in test:
 			print("File for testing", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "test", os.path.basename(f)))			
+			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "test", os.path.basename(f)))			
 			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
-				os.path.join(self.auto_label_path, "test", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+				os.path.join(self.auto_label_path, "labels", "test", os.path.splitext(os.path.basename(f))[0]) + ".txt")
 					
 		# start new each time, since there might be new labels	
 		self.training_thread = TrainingThread(self.NUM_EPOCHS, self.auto_label_path)
@@ -1633,10 +1642,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		else:
 			print("No existing auto label path in:", auto_label_path, "Creating...")
 			os.makedirs(auto_label_path)
-		
-		get_str = lambda str_id: self.string_bundle.get_string(str_id)
-		self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Model loaded")
-		
+				
 		# auto label
 		self.auto_label_path = auto_label_path
 		self.enable_auto_label_controls()
@@ -1645,10 +1651,15 @@ class MainWindow(QMainWindow, WindowMixin):
 		model_path = os.path.join(self.auto_label_path, "yolov8n_al", "weights", "best.pt")
 		if os.path.exists(model_path):
 			print("Loading existing model from:", model_path)
+			get_str = lambda str_id: self.string_bundle.get_string(str_id)
+			self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Loading model...")
+			QCoreApplication.processEvents()
 			self.auto_model = YOLO(model_path)
-
-		
-		
+			results = self.auto_model.val()
+			path = self.auto_model.export(format="onnx")		
+			self.auto_labeling_model_path.setText(get_str('auto_labeling_model_path') + " " + os.path.join("yolov8n_al", "weights", "best.pt"))
+			self.auto_labeling_model_score.setText(get_str('auto_labeling_model_score') + " " + str(results.box.map50))
+			self.auto_labeling_status_label.setText(get_str('auto_label_status') + " Model loaded")
 
 	def import_dir_images(self, dir_path):
 		if not self.may_continue() or not dir_path:

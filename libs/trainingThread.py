@@ -6,7 +6,7 @@ class TrainingThread(QThread):
 	finished = pyqtSignal(int)
 	progress = pyqtSignal(int)
 	export_model = pyqtSignal(str)
-	model_map = pyqtSignal(int)
+	model_map = pyqtSignal(float)
 	
 	def __init__(self, num_epochs, model_path):
 		QThread.__init__(self)
@@ -25,7 +25,7 @@ class TrainingThread(QThread):
 		model.add_callback("teardown", self.on_train_teardown)	
 
 		model.train(data=os.path.join(self.model_path, "yolov8al.yaml"), imgsz=640, epochs=self.num_epochs,
-			batch=8, name='yolov8n_al', project=self.model_path, exist_ok=True) #resume=True
+			batch=8, name='yolov8n_al', project=self.model_path, exist_ok=True) #resume=True, verbose=True
 		results = model.val()
 		print("Val results:", results)
 		path = model.export(format="onnx")
