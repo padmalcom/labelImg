@@ -15,6 +15,7 @@ from PIL import Image
 import glob
 from libs.trainingThread import TrainingThread
 from ultralytics import YOLO
+import traceback
 
 try:
 	from PyQt5.QtGui import *
@@ -1103,6 +1104,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
 	def load_labels(self, shapes):
 		s = []
+
+		print("Label list count before:", self.label_list.count())
 		for label, points, line_color, fill_color, difficult in shapes:
 			shape = Shape(label=label)
 			for x, y in points:
@@ -1126,8 +1129,8 @@ class MainWindow(QMainWindow, WindowMixin):
 				shape.fill_color = QColor(*fill_color)
 			else:
 				shape.fill_color = generate_color_by_text(label)
-
 			self.add_label(shape)
+		print("Label list count:", self.label_list.count())
 		self.update_combo_box()
 		self.canvas.load_shapes(s)
 
@@ -1135,6 +1138,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		# Get the unique labels and add them to the Combobox.
 		items_text_list = [str(self.label_list.item(i).text()) for i in range(self.label_list.count())]
 
+		print("There are", len(items_text_list), "labels.")
 		unique_text_list = list(set(items_text_list))
 		# Add a null row for showing all the labels
 		unique_text_list.append("")
@@ -1444,6 +1448,8 @@ class MainWindow(QMainWindow, WindowMixin):
 		return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
 	def show_bounding_box_from_annotation_file(self, file_path):
+		print(traceback.print_stack())
+		print("BBox for path:", file_path)
 		if self.default_save_dir is not None:
 			basename = os.path.basename(os.path.splitext(file_path)[0])
 			xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
@@ -1551,12 +1557,16 @@ class MainWindow(QMainWindow, WindowMixin):
 		images = []
 
 		for root, dirs, files in os.walk(folder_path):
+			# do not index images in auto label folder
+			if os.path.basename(root) == 'auto_label':
+				continue
+
 			for file in files:
 				if file.lower().endswith(tuple(extensions)):
 					relative_path = os.path.join(root, file)
 					path = ustr(os.path.abspath(relative_path))
 					images.append(path)
-					print("Appending", path)
+
 		#for file in os.listdir(folder_path):
 		#	if file.lower().endswith(tuple(extensions)):
 		#		images.append(os.path.join(folder_path, file))
@@ -1626,11 +1636,14 @@ class MainWindow(QMainWindow, WindowMixin):
 																	QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks))
 		else:
 			target_dir_path = ustr(default_open_dir_path)
+		
 		self.last_open_dir = target_dir_path
 		self.import_dir_images(target_dir_path)
 		self.default_save_dir = target_dir_path
-		if self.file_path:
-			self.show_bounding_box_from_annotation_file(file_path=self.file_path)
+		
+		# deleted to avoid doublettes
+		#if self.file_path:
+		#	self.show_bounding_box_from_annotation_file(file_path=self.file_path)
 		
 		auto_label_path = os.path.join(self.last_open_dir, "auto_label")
 		if os.path.exists(auto_label_path):
@@ -1951,7 +1964,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		self.set_format(FORMAT_YOLO)
 		t_yolo_parse_reader = YoloReader(txt_path, self.image)
 		shapes = t_yolo_parse_reader.get_shapes()
-		print(shapes)
+		print("Shapes:", shapes)
 		self.load_labels(shapes)
 		self.canvas.verified = t_yolo_parse_reader.verified
 
