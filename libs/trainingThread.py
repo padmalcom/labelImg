@@ -19,10 +19,9 @@ class TrainingThread(QThread):
 		#model = YOLO('yolov8n.yaml')
 		print(model.info())
 		self.process = 0
-		model.add_callback("on_train_epoch_start", self.on_train_epoch_start)
 		model.add_callback("on_train_epoch_end", self.on_train_epoch_end)
 		model.add_callback("on_train_end", self.on_train_end)
-		model.add_callback("teardown", self.on_train_teardown)	
+		model.add_callback("teardown", self.on_train_teardown)
 
 		model.train(data=os.path.join(self.model_path, "yolov8al.yaml"), imgsz=640, epochs=self.num_epochs,
 			batch=8, name='yolov8n_al', project=self.model_path, exist_ok=True) #resume=True, verbose=True
@@ -37,9 +36,6 @@ class TrainingThread(QThread):
 	def on_train_end(self, trainer):
 		self.process = self.process + 1
 		self.finished.emit(self.process)
-
-	def on_train_epoch_start(self, trainer):
-		print("Starting new epoch")
 
 	def on_train_epoch_end(self, trainer):
 		self.process = self.process + 1

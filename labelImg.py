@@ -15,7 +15,7 @@ from PIL import Image
 import glob
 from libs.trainingThread import TrainingThread
 from ultralytics import YOLO
-import traceback
+from pathvalidate import sanitize_filename
 
 try:
 	from PyQt5.QtGui import *
@@ -190,7 +190,7 @@ class MainWindow(QMainWindow, WindowMixin):
 		
 		# auto labeling
 		self.auto_label_path = None # auto label dataset path
-		self.NUM_EPOCHS = 10
+		self.NUM_EPOCHS = 50
 		self.auto_model = None
 		
 		self.train_auto_labeling_checkbox = QCheckBox(get_str('auto_labeling_train'))
@@ -693,7 +693,7 @@ class MainWindow(QMainWindow, WindowMixin):
 					
 		
 	def auto_label_train_func(self):
-		print("Train")
+		print("Starting training...")
 		
 		if not self.auto_label_path:
 			msg = QMessageBox()
@@ -716,44 +716,58 @@ class MainWindow(QMainWindow, WindowMixin):
 		all_jpg_files = glob.glob(self.auto_label_path + os.sep + "*.jpg")
 		print("There are", len(all_jpg_files), "labeled images in", self.auto_label_path + os.sep + "*.jpg")
 		train, validate, test = np.split(all_jpg_files, [int(len(all_jpg_files)*0.7), int(len(all_jpg_files)*0.9)])
+		
+		print(len(train), "for training,", len(validate), "for valudation and", len(test), "for test.")
 
-		# create folders
-		if not os.path.exists(os.path.join(self.auto_label_path, "images", "train")):
-			os.makedirs(os.path.join(self.auto_label_path, "images", "train"))
-				
-		if not os.path.exists(os.path.join(self.auto_label_path, "images", "val")):
-			os.makedirs(os.path.join(self.auto_label_path, "images", "val"))
+		# delete and create folders
+		img_train = os.path.join(self.auto_label_path, "images", "train")
+		shutil.rmtree(img_train)
+		os.makedirs(img_train)
+		
+		img_val = os.path.join(self.auto_label_path, "images", "val")
+		shutil.rmtree(img_val)
+		os.makedirs(img_val)
+
+		img_test = os.path.join(self.auto_label_path, "images", "test")
+		shutil.rmtree(img_test)
+		os.makedirs(img_test)
 			
-		if not os.path.exists(os.path.join(self.auto_label_path, "images", "test")):
-			os.makedirs(os.path.join(self.auto_label_path, "images", "test"))
-			
-		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "train")):
-			os.makedirs(os.path.join(self.auto_label_path, "labels", "train"))
-				
-		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "val")):
-			os.makedirs(os.path.join(self.auto_label_path, "labels", "val"))
-			
-		if not os.path.exists(os.path.join(self.auto_label_path, "labels", "test")):
-			os.makedirs(os.path.join(self.auto_label_path, "labels", "test"))
+		lbl_train = os.path.join(self.auto_label_path, "labels", "train")
+		shutil.rmtree(lbl_train)
+		os.makedirs(lbl_train)
+
+		lbl_val = os.path.join(self.auto_label_path, "labels", "val")
+		shutil.rmtree(lbl_val)
+		os.makedirs(lbl_val)
+
+		lbl_val = os.path.join(self.auto_label_path, "labels", "test")
+		shutil.rmtree(lbl_val)
+		os.makedirs(lbl_val)
 			
 		# distribute files
 		for f in train:
-			print("File for training", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "train", os.path.basename(f)))
-			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt", 
-				os.path.join(self.auto_label_path, "labels", "train", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+			#print("File for training", f)
+			target_file_name = sanitize_filename(os.path.basename(f))
+			text_file = os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt"
+			if os.path.exists(text_file):
+				shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "train", target_file_name))
+				shutil.copyfile(text_file, os.path.join(self.auto_label_path, "labels", "train", os.path.splitext(target_file_name)[0]) + ".txt")
 			
 		for f in validate:
-			print("File for validation", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "val", os.path.basename(f)))
-			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
-				os.path.join(self.auto_label_path, "labels", "val", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+			#print("File for validation", f)
+			target_file_name = sanitize_filename(os.path.basename(f))
+			text_file = os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt"
+			if os.path.exists(text_file):
+				shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "val", target_file_name))
+				shutil.copyfile(text_file, os.path.join(self.auto_label_path, "labels", "val", os.path.splitext(target_file_name)[0]) + ".txt")
 		
 		for f in test:
-			print("File for testing", f)
-			shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "test", os.path.basename(f)))			
-			shutil.copyfile(os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt",
-				os.path.join(self.auto_label_path, "labels", "test", os.path.splitext(os.path.basename(f))[0]) + ".txt")
+			#print("File for testing", f)
+			target_file_name = sanitize_filename(os.path.basename(f))
+			text_file = os.path.join(self.auto_label_path, os.path.splitext(os.path.basename(f))[0]) + ".txt"
+			if os.path.exists(text_file):
+				shutil.copyfile(f, os.path.join(self.auto_label_path, "images", "test", target_file_name))		
+				shutil.copyfile(text_file, os.path.join(self.auto_label_path, "labels", "test", os.path.splitext(target_file_name)[0]) + ".txt")
 					
 		# start new each time, since there might be new labels	
 		self.training_thread = TrainingThread(self.NUM_EPOCHS, self.auto_label_path)
@@ -1448,7 +1462,6 @@ class MainWindow(QMainWindow, WindowMixin):
 		return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
 	def show_bounding_box_from_annotation_file(self, file_path):
-		print(traceback.print_stack())
 		print("BBox for path:", file_path)
 		if self.default_save_dir is not None:
 			basename = os.path.basename(os.path.splitext(file_path)[0])

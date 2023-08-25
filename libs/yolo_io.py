@@ -92,7 +92,7 @@ class YoloReader:
 		else:
 			self.class_list_path = class_list_path
 
-		# print (file_path, self.class_list_path)
+		print ("YOLOReader classes:", file_path, self.class_list_path)
 
 		if os.path.exists(self.class_list_path):
 			classes_file = open(self.class_list_path, 'r')
